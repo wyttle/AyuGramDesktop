@@ -13,7 +13,8 @@ jobs:
 
   windows:
     name: Windows x64 portable (Release)
-    runs-on: windows-latest
+    runs-on: windows-2022
+    timeout-minutes: 330
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -52,7 +53,7 @@ jobs:
 
           sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
 
-          echo "release-full-v1" >> CACHE_KEY.txt
+          echo "windows-2022-vs2022-release-full-v2" >> CACHE_KEY.txt
           echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
           echo "$SDK" >> CACHE_KEY.txt
           echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
@@ -66,6 +67,22 @@ jobs:
           arch: x64
           sdk: ${{ env.SDK }}
           toolset: '14.44'
+          vsversion: '2022'
+
+      - name: Verify build environment.
+        run: |
+          if /I not "%Platform%"=="x64" exit /b 1
+          if not exist "%VCToolsInstallDir%atlmfc\include\atlbase.h" exit /b 1
+          if not exist "%VCToolsInstallDir%atlmfc\include\atlcomcli.h" exit /b 1
+          if not exist "%VCToolsInstallDir%atlmfc\lib\x64\atls.lib" exit /b 1
+          if not exist "%WindowsSdkDir%Include\10.0.26100.0\um\Windows.h" exit /b 1
+          where cl
+          where link
+          where msbuild
+          where cmake
+          where ninja
+          cl /Bv
+          cmake --version
 
       - name: NuGet sources.
         run: |
@@ -77,7 +94,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ env.TBUILD }}\ThirdParty
-          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-release-full-v1-${{ env.CACHE_KEY }}
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-windows-2022-vs2022-release-full-v2-${{ env.CACHE_KEY }}
 
       - name: Libraries cache.
         id: cache-libs
@@ -89,7 +106,7 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-libs-release-full-v1-${{ env.CACHE_KEY }}
+          key: ${{ runner.OS }}-x64-libs-windows-2022-vs2022-release-full-v2-${{ env.CACHE_KEY }}
 
       - name: Qt cache.
         id: cache-qt
@@ -98,7 +115,7 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-qt-release-full-v1-${{ env.CACHE_KEY }}
+          key: ${{ runner.OS }}-x64-qt-windows-2022-vs2022-release-full-v2-${{ env.CACHE_KEY }}
 
       - name: Libraries.
         run: |
@@ -109,6 +126,9 @@ jobs:
           if not exist "%LibrariesPath%\tg_angle\out\Release\tg_angle.lib" exit /b 1
           if not exist "%LibrariesPath%\libavif\Release\avif.lib" exit /b 1
           if not exist "%LibrariesPath%\local\include\avif\avif.h" exit /b 1
+          if not exist "%LibrariesPath%\Qt-5.15.19\lib\Qt5Core.lib" exit /b 1
+          if not exist "%LibrariesPath%\Qt-5.15.19\lib\Qt5Gui.lib" exit /b 1
+          if not exist "%LibrariesPath%\Qt-5.15.19\lib\Qt5Widgets.lib" exit /b 1
 
       - name: Free up some disk space.
         shell: bash
@@ -127,19 +147,28 @@ jobs:
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+          if errorlevel 1 exit /b %errorlevel%
 
-          cmake --build ..\out --config Release --parallel
+          cmake --build ..\out --config Release --target Telegram --parallel 2
+          if errorlevel 1 exit /b %errorlevel%
 
-      - name: Move artifact.
+          if not exist "..\out\Release\AyuGram.exe" exit /b 1
+          if not exist "..\out\Release\modules\x64\d3d\d3dcompiler_47.dll" exit /b 1
+
+      - name: Package artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           set OUT=%TBUILD%\%REPO_NAME%\out\Release
-          mkdir artifact
-          move "%OUT%\AyuGram.exe" artifact\
+          mkdir artifact\AyuGram\modules\x64\d3d
+          mkdir artifact\AyuGram\TelegramForcePortable\tdata
+          copy "%OUT%\AyuGram.exe" artifact\AyuGram\
+          copy "%OUT%\modules\x64\d3d\d3dcompiler_47.dll" artifact\AyuGram\modules\x64\d3d\
+          7z a -tzip -mx=9 artifact\AyuGram-portable-x64.zip .\artifact\AyuGram\
+          if errorlevel 1 exit /b %errorlevel%
 
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
           name: AyuGram-portable-x64
-          path: artifact\
+          path: artifact\AyuGram-portable-x64.zip
