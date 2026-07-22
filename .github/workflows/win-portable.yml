@@ -52,6 +52,7 @@ jobs:
 
           sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
 
+          echo "release-full-v1" >> CACHE_KEY.txt
           echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
           echo "$SDK" >> CACHE_KEY.txt
           echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
@@ -76,8 +77,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ env.TBUILD }}\ThirdParty
-          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-release-full-v1-${{ env.CACHE_KEY }}
 
       - name: Libraries cache.
         id: cache-libs
@@ -89,8 +89,7 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-libs-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-x64-libs-
+          key: ${{ runner.OS }}-x64-libs-release-full-v1-${{ env.CACHE_KEY }}
 
       - name: Qt cache.
         id: cache-qt
@@ -99,12 +98,17 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-qt-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-x64-qt-
+          key: ${{ runner.OS }}-x64-qt-release-full-v1-${{ env.CACHE_KEY }}
 
       - name: Libraries.
         run: |
-          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent
+
+      - name: Verify Release libraries.
+        run: |
+          if not exist "%LibrariesPath%\tg_angle\out\Release\tg_angle.lib" exit /b 1
+          if not exist "%LibrariesPath%\libavif\Release\avif.lib" exit /b 1
+          if not exist "%LibrariesPath%\local\include\avif\avif.h" exit /b 1
 
       - name: Free up some disk space.
         shell: bash
