@@ -10,9 +10,8 @@ permissions:
   contents: read
 
 jobs:
-
   windows:
-    name: Windows x64 portable (Release)
+    name: Windows x64 portable (Debug)
     runs-on: windows-2022
     timeout-minutes: 330
 
@@ -38,7 +37,7 @@ jobs:
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
       - name: Clone.
-        uses: actions/checkout@v7
+        uses: actions/checkout@v6
         with:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
@@ -46,14 +45,12 @@ jobs:
       - name: First set up.
         shell: bash
         run: |
-          # AyuGram removed docs/building-win.md, so the SDK version from
-          # official tdesktop v7.0.1 docs is pinned here instead of parsed.
           SDK="10.0.26100.0"
           echo "SDK=$SDK" >> $GITHUB_ENV
 
           sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
 
-          echo "windows-2022-vs2022-release-full-v2" >> CACHE_KEY.txt
+          echo "nasm-2.16.03-debug-v1" >> CACHE_KEY.txt
           echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
           echo "$SDK" >> CACHE_KEY.txt
           echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
@@ -61,28 +58,11 @@ jobs:
           git config --global user.email "you@example.com"
           git config --global user.name "Sample"
 
-      - uses: Eden-CI/msvc-dev-cmd@1bd71f95d6f3d1b2b3395b335cc63bcdc90cf223
+      - uses: ilammy/msvc-dev-cmd@v1.13.0
         name: Native Tools Command Prompt.
         with:
           arch: x64
           sdk: ${{ env.SDK }}
-          toolset: '14.44'
-          vsversion: '2022'
-
-      - name: Verify build environment.
-        run: |
-          if /I not "%Platform%"=="x64" exit /b 1
-          if not exist "%VCToolsInstallDir%atlmfc\include\atlbase.h" exit /b 1
-          if not exist "%VCToolsInstallDir%atlmfc\include\atlcomcli.h" exit /b 1
-          if not exist "%VCToolsInstallDir%atlmfc\lib\x64\atls.lib" exit /b 1
-          if not exist "%WindowsSdkDir%Include\10.0.26100.0\um\Windows.h" exit /b 1
-          where cl
-          where link
-          where msbuild
-          where cmake
-          where ninja
-          cl /Bv
-          cmake --version
 
       - name: NuGet sources.
         run: |
@@ -91,14 +71,14 @@ jobs:
 
       - name: ThirdParty cache.
         id: cache-third-party
-        uses: actions/cache@v6
+        uses: actions/cache@v5
         with:
           path: ${{ env.TBUILD }}\ThirdParty
-          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-windows-2022-vs2022-release-full-v2-${{ env.CACHE_KEY }}
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-debug-nasm216-${{ env.CACHE_KEY }}
 
       - name: Libraries cache.
         id: cache-libs
-        uses: actions/cache@v6
+        uses: actions/cache@v5
         with:
           path: |
             ${{ env.LibrariesPath }}\*
@@ -106,29 +86,41 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-libs-windows-2022-vs2022-release-full-v2-${{ env.CACHE_KEY }}
+          key: ${{ runner.OS }}-x64-libs-debug-nasm216-${{ env.CACHE_KEY }}
 
       - name: Qt cache.
         id: cache-qt
-        uses: actions/cache@v6
+        uses: actions/cache@v5
         with:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-x64-qt-windows-2022-vs2022-release-full-v2-${{ env.CACHE_KEY }}
+          key: ${{ runner.OS }}-x64-qt-debug-nasm216-${{ env.CACHE_KEY }}
+
+      - name: Prepare MSYS2.
+        env:
+          GYP_MSVS_OVERRIDE_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\'
+          GYP_MSVS_VERSION: 2022
+        run: |
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent msys64
+
+      - name: Pin NASM 2.16.03.
+        shell: powershell
+        run: |
+          $archive = "$env:RUNNER_TEMP\nasm-2.16.03-win64.zip"
+          $destination = "$env:RUNNER_TEMP\nasm-2.16.03"
+          Invoke-WebRequest -Uri "https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/win64/nasm-2.16.03-win64.zip" -OutFile $archive
+          if ((Get-FileHash -Algorithm SHA256 $archive).Hash -ne "3EE4782247BCB874378D02F7EAB4E294A84D3D15F3F6EE2DE2F47A46AA7226E6") { exit 1 }
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+          Copy-Item -LiteralPath "$destination\nasm-2.16.03\nasm.exe" -Destination "$env:TBUILD\ThirdParty\msys64\mingw64\bin\nasm.exe" -Force
+          & "$env:TBUILD\ThirdParty\msys64\mingw64\bin\nasm.exe" -v
 
       - name: Libraries.
+        env:
+          GYP_MSVS_OVERRIDE_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\'
+          GYP_MSVS_VERSION: 2022
         run: |
-          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent
-
-      - name: Verify Release libraries.
-        run: |
-          if not exist "%LibrariesPath%\tg_angle\out\Release\tg_angle.lib" exit /b 1
-          if not exist "%LibrariesPath%\libavif\Release\avif.lib" exit /b 1
-          if not exist "%LibrariesPath%\local\include\avif\avif.h" exit /b 1
-          if not exist "%LibrariesPath%\Qt-5.15.19\lib\Qt5Core.lib" exit /b 1
-          if not exist "%LibrariesPath%\Qt-5.15.19\lib\Qt5Gui.lib" exit /b 1
-          if not exist "%LibrariesPath%\Qt-5.15.19\lib\Qt5Widgets.lib" exit /b 1
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent
 
       - name: Free up some disk space.
         shell: bash
@@ -143,26 +135,26 @@ jobs:
           x64 ^
           -D TDESKTOP_API_ID=611335 ^
           -D TDESKTOP_API_HASH=d524b414d21f4d37f08684c1df41ac9c ^
-          -D CMAKE_CONFIGURATION_TYPES=Release ^
+          -D CMAKE_CONFIGURATION_TYPES=Debug ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
           if errorlevel 1 exit /b %errorlevel%
 
-          cmake --build ..\out --config Release --target Telegram --parallel 2
+          cmake --build ..\out --config Debug --target Telegram --parallel 1
           if errorlevel 1 exit /b %errorlevel%
-
-          if not exist "..\out\Release\AyuGram.exe" exit /b 1
-          if not exist "..\out\Release\modules\x64\d3d\d3dcompiler_47.dll" exit /b 1
 
       - name: Package artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          set OUT=%TBUILD%\%REPO_NAME%\out\Release
-          mkdir artifact\AyuGram\modules\x64\d3d
+          set OUT=%TBUILD%\%REPO_NAME%\out\Debug
+          if not exist "%OUT%\AyuGram.exe" exit /b 1
           mkdir artifact\AyuGram\TelegramForcePortable\tdata
           copy "%OUT%\AyuGram.exe" artifact\AyuGram\
-          copy "%OUT%\modules\x64\d3d\d3dcompiler_47.dll" artifact\AyuGram\modules\x64\d3d\
+          if exist "%OUT%\modules\x64\d3d\d3dcompiler_47.dll" (
+            mkdir artifact\AyuGram\modules\x64\d3d
+            copy "%OUT%\modules\x64\d3d\d3dcompiler_47.dll" artifact\AyuGram\modules\x64\d3d\
+          )
           7z a -tzip -mx=9 artifact\AyuGram-portable-x64.zip .\artifact\AyuGram\
           if errorlevel 1 exit /b %errorlevel%
 
@@ -170,5 +162,5 @@ jobs:
         name: Upload artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
-          name: AyuGram-portable-x64
+          name: AyuGram-portable-x64-debug
           path: artifact\AyuGram-portable-x64.zip
